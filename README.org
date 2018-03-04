@@ -1,0 +1,115 @@
+#+TITLE: cl-multiplex
+
+*cl-multiplex* is a library facilitating the multiplexing of the data
+of several channels into one octet stream, and the demultiplexing of
+the data read from the octet stream.
+
+* Installation
+
+The only dependency is the [[https://github.com/glv2/cl-octet-streams][cl-octet-streams]] library.
+
+* Multiplex streams
+
+#+BEGIN_SRC lisp
+(make-multiplex-stream stream channels) => multiplex-stream
+#+END_SRC
+
+Return a multiplex stream. The data written to several channels will
+be multiplexed before being written to /stream/. The data read from
+/stream/ will be demultiplexed and made available in the channels. The
+number of channels to use is indicated by /channels/.
+
+#+BEGIN_SRC lisp
+(close-multiplex-stream multiplex-stream) => nil
+#+END_SRC
+
+Close all the channels of /multiplex-stream/.
+
+#+BEGIN_SRC lisp
+(with-multiplex-stream (var stream channels) &body body)
+#+END_SRC
+
+Within /body/, /var/ is bound to a multiplex stream defined by
+/stream/ and /channels/. The result of the last form of /body/ is
+returned.
+
+#+BEGIN_SRC lisp
+(multiplex multiplex-stream) => t
+#+END_SRC
+
+Multiplex the data that was written to the channels of
+/multiplex-stream/ and write it to the underlying stream. The
+mutiplexed frames written to the underlying stream contain at most
+=*max-frame-size*= bytes of user data.
+
+#+BEGIN_SRC lisp
+(finish-multiplex-output multiplex-stream) => nil
+#+END_SRC
+
+Multiplex the data that was written to the channels of
+/multiplex-stream/ and return when everything has been written
+successfully to the underlying stream.
+
+#+BEGIN_SRC lisp
+(clear-multiplex-input multiplex-stream) => nil
+#+END_SRC
+
+Clear the input of all the channels of /multiplex-tream/.
+
+#+BEGIN_SRC lisp
+(demultiplex multiplex-stream) => boolean
+#+END_SRC
+
+Read data from the underlying stream of /multiplex-stream/ and
+demultiplex as many frames as possible. Return /T/ if at least one
+frame was demultiplexed successfully, and /NIL/ otherwise.
+
+#+BEGIN_SRC lisp
+(write-data data multiplex-stream channel &key (start 0) end) => data
+#+END_SRC
+
+Like /write-sequence/ for mutiplex streams. Write the byte of /data/
+between /start/ end /end/ to a specific /channel/ of
+/multiplex-stream/.
+
+#+BEGIN_SRC lisp
+(read-data data multiplex-stream channel &key (start 0) end) => position
+#+END_SRC
+
+Like /read-sequence/ for multiplex streams. Fill /data/ between
+/start/ and /end/ with bytes read from a specific /channel/ of
+/multiplex-stream/.
+
+#+BEGIN_SRC lisp
+(clear-channel-input multiplex-stream channel) => nil
+#+END_SRC
+
+Clear the input of a specific /channel/ of /multiplex-tream/.
+
+#+BEGIN_SRC lisp
+(get-channel-stream multiplex-stream channel) => stream
+#+END_SRC
+
+Return a stream that can be used to read/write data from/to
+a specific /channel/ of /multiplex-stream/.
+
+* Protocol
+
+The multiplexed data is organized in frames having the following format:
+
+#+BEGIN_EXAMPLE
++---------+------+------+
+| channel | size | data |
++---------+------+------+
+#+END_EXAMPLE
+
+/channel/ and /size/ are integers encoded using the [[https://developers.google.com/protocol-buffers/docs/encoding#varints][base 128 varint encoding]].
+/size/ indicates the number of bytes of /data/.
+
+* Tests
+
+The tests require the [[https://common-lisp.net/project/fiveam][fiveam]] library.
+
+#+BEGIN_SRC lisp
+(asdf:test-system "cl-multiplex")
+#+END_SRC
