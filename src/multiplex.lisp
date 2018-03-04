@@ -4,177 +4,166 @@
 ;;;; See the file LICENSE for terms of use and distribution.
 
 
-(defpackage :cl-multiplex
-  (:nicknames :multiplex)
-  (:use :cl)
-  (:export #:make-multiplex-stream
+(defpackage :multiplex
+  (:nicknames :cl-multiplex)
+  (:use :cl :octet-streams)
+  (:export #:*max-frame-size*
+           #:make-multiplex-stream
+           #:with-multiplex-stream
            #:multiplex
            #:finish-multiplex-output
            #:clear-multiplex-input
            #:demultiplex
            #:write-data
            #:read-data
-           #:channel-length
-           #:clear-channel-input))
+           #:clear-channel-input
+           #:get-channel-stream))
 
 (in-package :multiplex)
 
 
-(defconstant +initial-buffer-length+ 128)
+(defparameter *max-frame-size* 1024
+  "Maximum number of bytes of data in a frame.")
 
 (defstruct (multiplex-stream (:constructor %make-multiplex-stream))
   stream
-  (data (make-array +initial-buffer-length+
-                    :element-type '(unsigned-byte 8)
-                    :adjustable t))
-  (data-length 0)
-  current-frame-channel
-  current-frame-length
+  (data (make-array 128 :element-type '(unsigned-byte 8))
+   :type (simple-array (unsigned-byte 8) (*)))
+  (data-length 0 :type (mod #.array-dimension-limit))
+  (current-frame-channel nil :type (or null unsigned-byte))
+  (current-frame-length nil :type (or null unsigned-byte))
   inputs
-  input-starts
-  input-ends
-  outputs
-  output-ends)
+  outputs)
 
 (defun make-multiplex-stream (stream channels)
+  "Return a multiplex stream. The data written to several channels
+will be multiplexed before being written to STREAM. The data read from
+STREAM will be demultiplexed and made available in the channels. The
+number of channels to use is indicated by CHANNELS."
   (let ((inputs (make-array channels))
-        (input-starts (make-array channels
-                                  :element-type 'unsigned-byte
-                                  :initial-element 0))
-        (input-ends (make-array channels
-                                :element-type 'unsigned-byte
-                                :initial-element 0))
-        (outputs (make-array channels))
-        (output-ends (make-array channels
-                                 :element-type 'unsigned-byte
-                                 :initial-element 0)))
+        (outputs (make-array channels)))
     (dotimes (i channels)
-      (setf (aref inputs i) (make-array +initial-buffer-length+
-                                        :element-type '(unsigned-byte 8)
-                                        :adjustable t))
-      (setf (aref outputs i) (make-array +initial-buffer-length+
-                                         :element-type '(unsigned-byte 8)
-                                         :adjustable t)))
+      (setf (aref inputs i) (make-octet-pipe))
+      (setf (aref outputs i) (make-octet-pipe)))
     (%make-multiplex-stream :stream stream
                             :inputs inputs
-                            :input-starts input-starts
-                            :input-ends input-ends
-                            :outputs outputs
-                            :output-ends output-ends)))
+                            :outputs outputs)))
+
+(defmacro with-multiplex-stream ((var stream channels) &body body)
+  "Within BODY, VAR is bound to a multiplex stream defined by STREAM
+and CHANNELS. The result of the last form of BODY is returned."
+  `(with-open-stream (,var (make-multiplex-stream ,stream ,channels))
+     ,@body))
 
 (defun multiplex (multiplex-stream)
+  "Multiplex the data that was written to the channels of
+MULTIPLEX-STREAM and write it to the underlying stream."
   (let ((stream (multiplex-stream-stream multiplex-stream))
         (outputs (multiplex-stream-outputs multiplex-stream))
-        (ends (multiplex-stream-output-ends multiplex-stream)))
+        (buffer (make-array *max-frame-size* :element-type '(unsigned-byte 8))))
     (flet ((write-integer (n)
              (do* ((l (max 1 (ceiling (integer-length n) 7)) (1- l))
                    (x n (ash x -7)))
                   ((zerop l) n)
                (write-byte (logior (logand x #x7f) (if (= l 1) 0 #x80)) stream))))
       (dotimes (channel (length outputs) t)
-        (let ((output (aref outputs channel))
-              (end (aref ends channel)))
-          (when (plusp end)
-            (write-integer channel)
-            (write-integer end)
-            (write-sequence output stream :end end)
-            (setf (aref ends channel) 0)))))))
+        (do ((length (read-sequence buffer (aref outputs channel))
+                     (read-sequence buffer (aref outputs channel))))
+            ((zerop length))
+          (write-integer channel)
+          (write-integer length)
+          (write-sequence buffer stream :end length))))))
 
 (defun finish-multiplex-output (multiplex-stream)
+  "Multiplex the data that was written to the channels of
+MULTIPLEX-STREAM and return when everything has been written
+successfully to the underlying stream."
   (multiplex multiplex-stream)
   (finish-output (multiplex-stream-stream multiplex-stream)))
 
 (defun clear-multiplex-input (multiplex-stream)
-  (clear-input (multiplex-stream-stream multiplex-stream))
-  (fill (multiplex-stream-input-starts multiplex-stream) 0)
-  (fill (multiplex-stream-input-ends multiplex-stream) 0)
-  (setf (multiplex-stream-data-length multiplex-stream) 0)
-  (setf (multiplex-stream-current-frame-channel multiplex-stream) nil)
-  (setf (multiplex-stream-current-frame-length multiplex-stream) nil))
+  "Clear the input of all the channels of MULTIPLEX-TREAM."
+  (let ((inputs (multiplex-stream-inputs multiplex-stream)))
+    (dotimes (channel (length inputs))
+      (clear-input (aref inputs channel)))))
+
+(defun demultiplex-1 (multiplex-stream)
+  "Read data from the underlying stream of MULTIPLEX-STREAM and
+demultiplex one frame. Return T if a frame was demultiplexed
+successfully, and NIL otherwise."
+  (with-slots (stream
+               data
+               data-length
+               (channel current-frame-channel)
+               (length current-frame-length)
+               inputs)
+      multiplex-stream
+    (flet ((read-integer ()
+             (handler-case
+                 (loop
+                   (let ((b (read-byte stream)))
+                     (when (>= data-length (length data))
+                       (setf data (make-array (* 2 (length data))
+                                              :element-type '(unsigned-byte 8))))
+                     (setf (aref data data-length) b)
+                     (incf data-length)
+                     (when (zerop (logand b #x80))
+                       (do* ((i 0 (1+ i))
+                             (j 0 (+ j 7))
+                             (b (aref data i) (aref data i))
+                             (n (logand b #x7f) (+ n (ash (logand b #x7f) j))))
+                            ((= i (1- data-length))
+                             (progn
+                               (setf data-length 0)
+                               (return-from read-integer n)))))))
+               (end-of-file ()
+                 (return-from demultiplex-1 nil)))))
+      (unless channel
+        (setf channel (read-integer)))
+      (unless length
+        (setf length (read-integer)))
+      (when (>= length (length data))
+        (setf data (make-array length :element-type '(unsigned-byte 8))))
+      (let ((input (aref inputs channel))
+            (n (read-sequence data stream :start data-length :end length)))
+        (if (= n length)
+            (progn
+              (write-sequence data input :end length)
+              (setf data-length 0)
+              (setf channel nil)
+              (setf length nil)
+              t)
+            (progn
+              (setf data-length n)
+              nil))))))
 
 (defun demultiplex (multiplex-stream)
-  (let ((complete-frame-p nil))
-    (with-slots (stream
-                 data
-                 data-length
-                 (channel current-frame-channel)
-                 (length current-frame-length)
-                 inputs
-                 (starts input-starts)
-                 (ends input-ends))
-        multiplex-stream
-      (flet ((read-integer ()
-               (handler-case
-                   (loop
-                     (let ((b (read-byte stream)))
-                       (when (= data-length (length data))
-                         (adjust-array data (1+ data-length)))
-                       (setf (aref data data-length) b)
-                       (incf data-length)
-                       (when (zerop (logand b #x80))
-                         (do* ((i 0 (1+ i))
-                               (j 0 (+ j 7))
-                               (b (aref data i) (aref data i))
-                               (n (logand b #x7f) (+ n (ash (logand b #x7f) j))))
-                              ((= i (1- data-length)) (return-from read-integer n))))))
-                 (end-of-file ()
-                   (return-from demultiplex complete-frame-p)))))
-        (loop
-          (unless channel
-            (setf channel (read-integer))
-            (setf data-length 0))
-          (unless length
-            (setf length (read-integer))
-            (setf data-length 0))
-          (when (< (length data) length)
-            (adjust-array data length))
-          (let ((input (aref inputs channel))
-                (start (aref starts channel))
-                (end (aref ends channel)))
-            (when (< (- (length input) end) length)
-              (replace input input :start2 start)
-              (decf end start)
-              (setf start 0)
-              (setf (aref starts channel) start)
-              (setf (aref ends channel) end))
-            (when (< (- (length input) end) length)
-              (adjust-array input (+ end length)))
-            (let ((n (read-sequence data stream :start data-length :end length)))
-              (unless (= n length)
-                (setf data-length n)
-                (return-from demultiplex complete-frame-p)))
-            (setf complete-frame-p t)
-            (replace input data :start1 end :end2 length)
-            (incf (aref ends channel) length)
-            (setf data-length 0)
-            (setf channel nil)
-            (setf length nil)))))))
+  "Read data from the underlying stream of MULTIPLEX-STREAM and
+demultiplex as many frames as possible. Return T if at least one frame
+was demultiplexed successfully, and NIL otherwise."
+  (do* ((frame-p (demultiplex-1 multiplex-stream) (demultiplex-1 multiplex-stream))
+        (at-least-one-frame-p frame-p (or at-least-one-frame-p frame-p)))
+       ((null frame-p) at-least-one-frame-p)))
 
 (defun write-data (data multiplex-stream channel &key (start 0) end)
-  (let* ((end (or end (length data)))
-         (length (- end start))
-         (output (aref (multiplex-stream-outputs multiplex-stream) channel))
-         (output-end (aref (multiplex-stream-output-ends multiplex-stream) channel)))
-    (when (< (- (length output) output-end) length)
-      (adjust-array output (+ (length output) length)))
-    (replace output data :start1 output-end :start2 start :end2 end)
-    (incf (aref (multiplex-stream-output-ends multiplex-stream) channel) length)
-    data))
+  "Like WRITE-SEQUENCE for mutiplex streams. Write the byte of DATA
+between START end END to a specific CHANNEL of MULTIPLEX-STREAM."
+  (let ((output (aref (multiplex-stream-outputs multiplex-stream) channel)))
+    (write-sequence data output :start start :end end)))
 
 (defun read-data (data multiplex-stream channel &key (start 0) end)
-  (let* ((end (or end (length data)))
-         (input (aref (multiplex-stream-inputs multiplex-stream) channel))
-         (input-start (aref (multiplex-stream-input-starts multiplex-stream) channel))
-         (input-end (aref (multiplex-stream-input-ends multiplex-stream) channel))
-         (length (min (- end start) (- input-end input-start))))
-    (replace data input :start1 start :end1 end :start2 input-start :end2 input-end)
-    (incf (aref (multiplex-stream-input-starts multiplex-stream) channel) length)
-    (+ start length)))
-
-(defun channel-length (multiplex-stream channel)
-  (- (aref (multiplex-stream-input-ends multiplex-stream) channel)
-     (aref (multiplex-stream-input-starts multiplex-stream) channel)))
+  "Like READ-SEQUENCE for multiplex streams. Fill DATA between START
+and END with bytes read from a specific CHANNEL of MULTIPLEX-STREAM."
+  (let ((input (aref (multiplex-stream-inputs multiplex-stream) channel)))
+    (read-sequence data input :start start :end end)))
 
 (defun clear-channel-input (multiplex-stream channel)
-  (setf (aref (multiplex-stream-input-starts multiplex-stream) channel) 0)
-  (setf (aref (multiplex-stream-input-ends multiplex-stream) channel) 0))
+  "Clear the input of a specific CHANNEL of MULTIPLEX-TREAM."
+  (let ((input (aref (multiplex-stream-inputs multiplex-stream) channel)))
+    (clear-input input)))
+
+(defun get-channel-stream (multiplex-stream channel)
+  "Return a stream that can be used to read/write data from/to
+a specific CHANNEL of MULTIPLEX-STREAM."
+  (make-two-way-stream (aref (multiplex-stream-inputs multiplex-stream) channel)
+                       (aref (multiplex-stream-outputs multiplex-stream) channel)))

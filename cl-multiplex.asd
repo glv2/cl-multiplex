@@ -8,7 +8,8 @@
   :name "cl-multiplex"
   :description "Multiplexing library for binary data"
   :version "1.0"
-  :author "Guillaume LE VAILLANT"
   :license "GPL-3"
+  :author "Guillaume LE VAILLANT"
+  :depends-on ("cl-octet-streams")
   :components ((:module "src"
                 :components ((:file "multiplex")))))
