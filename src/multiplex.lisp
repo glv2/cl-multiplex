@@ -9,6 +9,7 @@
   (:use :cl :octet-streams)
   (:export #:*max-frame-size*
            #:make-multiplex-stream
+           #:close-multiplex-stream
            #:with-multiplex-stream
            #:multiplex
            #:finish-multiplex-output
@@ -40,20 +41,31 @@
 will be multiplexed before being written to STREAM. The data read from
 STREAM will be demultiplexed and made available in the channels. The
 number of channels to use is indicated by CHANNELS."
+  (assert (plusp channels))
   (let ((inputs (make-array channels))
         (outputs (make-array channels)))
-    (dotimes (i channels)
-      (setf (aref inputs i) (make-octet-pipe))
-      (setf (aref outputs i) (make-octet-pipe)))
+    (dotimes (channel channels)
+      (setf (aref inputs channel) (make-octet-pipe))
+      (setf (aref outputs channel) (make-octet-pipe)))
     (%make-multiplex-stream :stream stream
                             :inputs inputs
                             :outputs outputs)))
 
+(defun close-multiplex-stream (multiplex-stream)
+  "Close all the channels of MULTIPLEX-STREAM."
+  (let ((inputs (multiplex-stream-inputs multiplex-stream))
+        (outputs (multiplex-stream-outputs multiplex-stream)))
+    (dotimes (channel (length inputs))
+      (close (aref inputs channel))
+      (close (aref outputs channel)))))
+
 (defmacro with-multiplex-stream ((var stream channels) &body body)
   "Within BODY, VAR is bound to a multiplex stream defined by STREAM
 and CHANNELS. The result of the last form of BODY is returned."
-  `(with-open-stream (,var (make-multiplex-stream ,stream ,channels))
-     ,@body))
+  `(let ((,var (make-multiplex-stream ,stream ,channels)))
+     (unwind-protect
+          ,@body
+       (close-multiplex-stream ,var))))
 
 (defun multiplex (multiplex-stream)
   "Multiplex the data that was written to the channels of
@@ -103,8 +115,10 @@ successfully, and NIL otherwise."
                  (loop
                    (let ((b (read-byte stream)))
                      (when (>= data-length (length data))
-                       (setf data (make-array (* 2 (length data))
-                                              :element-type '(unsigned-byte 8))))
+                       (let ((new-buffer (make-array (* 2 (length data))
+                                                     :element-type '(unsigned-byte 8))))
+                         (replace new-buffer data :end2 data-length)
+                         (setf data new-buffer)))
                      (setf (aref data data-length) b)
                      (incf data-length)
                      (when (zerop (logand b #x80))
