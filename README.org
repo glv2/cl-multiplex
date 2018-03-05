@@ -34,13 +34,13 @@ Within /body/, /var/ is bound to a multiplex stream defined by
 returned.
 
 #+BEGIN_SRC lisp
-(multiplex multiplex-stream) => t
+(multiplex multiplex-stream &optional max-frame-size) => t
 #+END_SRC
 
 Multiplex the data that was written to the channels of
 /multiplex-stream/ and write it to the underlying stream. The
 mutiplexed frames written to the underlying stream contain at most
-=*max-frame-size*= bytes of user data.
+/max-frame-size/ bytes of user data (1024 by default).
 
 #+BEGIN_SRC lisp
 (finish-multiplex-output multiplex-stream) => nil

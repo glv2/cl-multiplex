@@ -7,8 +7,7 @@
 (defpackage :multiplex
   (:nicknames :cl-multiplex)
   (:use :cl :octet-streams)
-  (:export #:*max-frame-size*
-           #:make-multiplex-stream
+  (:export #:make-multiplex-stream
            #:close-multiplex-stream
            #:with-multiplex-stream
            #:multiplex
@@ -22,9 +21,6 @@
 
 (in-package :multiplex)
 
-
-(defparameter *max-frame-size* 1024
-  "Maximum number of bytes of data in a frame.")
 
 (defstruct (multiplex-stream (:constructor %make-multiplex-stream))
   stream
@@ -67,12 +63,14 @@ and CHANNELS. The result of the last form of BODY is returned."
           ,@body
        (close-multiplex-stream ,var))))
 
-(defun multiplex (multiplex-stream)
+(defun multiplex (multiplex-stream &optional (max-frame-size 1024))
   "Multiplex the data that was written to the channels of
-MULTIPLEX-STREAM and write it to the underlying stream."
+MULTIPLEX-STREAM and write it to the underlying stream. The mutiplexed
+frames written to the underlying stream contain at most
+MAX-FRAME-SIZE bytes of user data."
   (let ((stream (multiplex-stream-stream multiplex-stream))
         (outputs (multiplex-stream-outputs multiplex-stream))
-        (buffer (make-array *max-frame-size* :element-type '(unsigned-byte 8))))
+        (buffer (make-array max-frame-size :element-type '(unsigned-byte 8))))
     (flet ((write-integer (n)
              (do* ((l (max 1 (ceiling (integer-length n) 7)) (1- l))
                    (x n (ash x -7)))
