@@ -61,8 +61,8 @@ Clear the input of all the channels of /multiplex-tream/.
 #+END_SRC
 
 Read data from the underlying stream of /multiplex-stream/ and
-demultiplex the frames. Return /T/ if at least one frame was
-demultiplexed successfully, and /NIL/ otherwise. If /max-frames/ is
+demultiplex the frames. Return /t/ if at least one frame was
+demultiplexed successfully, and /nil/ otherwise. If /max-frames/ is
 a positive integer, at most /max-frames/ frames will be
 demultiplexed."
 
