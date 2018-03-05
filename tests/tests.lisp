@@ -15,6 +15,10 @@
 
 (in-suite cl-multiplex)
 
+(defun demultiplex/eof (multiplex-stream)
+  (handler-case (demultiplex multiplex-stream)
+    (end-of-file () nil)))
+
 (test make-multiplex-stream
   (with-octet-pipe (p)
     (is-true (make-multiplex-stream p 2))
@@ -95,13 +99,13 @@
     (with-multiplex-stream (m p 3)
       (let ((buffer (make-array 5 :element-type '(unsigned-byte 8))))
         (write-sequence #(0 3 0 1) p)
-        (is-false (demultiplex m))
+        (is-false (demultiplex/eof m))
         (write-sequence #(2) p)
         (is-true (demultiplex m))
         (write-sequence #(2) p)
-        (is-false (demultiplex m))
+        (is-false (demultiplex/eof m))
         (write-sequence #(4) p)
-        (is-false (demultiplex m))
+        (is-false (demultiplex/eof m))
         (write-sequence #(10 11 12 13 1 5 5 6) p)
         (is-true (demultiplex m))
         (write-sequence #(7 8 9 2 1 14 0 2 3 4) p)

@@ -111,27 +111,24 @@ successfully, and NIL otherwise."
                inputs)
       multiplex-stream
     (flet ((read-integer ()
-             (handler-case
-                 (loop
-                   (let ((b (read-byte stream)))
-                     (when (>= data-length (length data))
-                       (let ((new-buffer (make-array (* 2 (length data))
-                                                     :element-type '(unsigned-byte 8))))
-                         (replace new-buffer data :end2 data-length)
-                         (setf data new-buffer)))
-                     (setf (aref data data-length) b)
-                     (incf data-length)
-                     (when (zerop (logand b #x80))
-                       (do* ((i 0 (1+ i))
-                             (j 0 (+ j 7))
-                             (b (aref data i) (aref data i))
-                             (n (logand b #x7f) (+ n (ash (logand b #x7f) j))))
-                            ((= i (1- data-length))
-                             (progn
-                               (setf data-length 0)
-                               (return-from read-integer n)))))))
-               (end-of-file ()
-                 (return-from demultiplex-1 nil)))))
+             (loop
+               (let ((b (read-byte stream)))
+                 (when (>= data-length (length data))
+                   (let ((new-buffer (make-array (* 2 (length data))
+                                                 :element-type '(unsigned-byte 8))))
+                     (replace new-buffer data :end2 data-length)
+                     (setf data new-buffer)))
+                 (setf (aref data data-length) b)
+                 (incf data-length)
+                 (when (zerop (logand b #x80))
+                   (do* ((i 0 (1+ i))
+                         (j 0 (+ j 7))
+                         (b (aref data i) (aref data i))
+                         (n (logand b #x7f) (+ n (ash (logand b #x7f) j))))
+                        ((= i (1- data-length))
+                         (progn
+                           (setf data-length 0)
+                           (return-from read-integer n)))))))))
       (unless channel
         (setf channel (read-integer)))
       (unless length
@@ -155,9 +152,15 @@ successfully, and NIL otherwise."
   "Read data from the underlying stream of MULTIPLEX-STREAM and
 demultiplex as many frames as possible. Return T if at least one frame
 was demultiplexed successfully, and NIL otherwise."
-  (do* ((frame-p (demultiplex-1 multiplex-stream) (demultiplex-1 multiplex-stream))
-        (at-least-one-frame-p frame-p (or at-least-one-frame-p frame-p)))
-       ((null frame-p) at-least-one-frame-p)))
+  (let ((at-least-one-frame-p nil))
+    (handler-case
+        (do ((frame-p (demultiplex-1 multiplex-stream)
+                      (demultiplex-1 multiplex-stream)))
+            ((null frame-p) at-least-one-frame-p)
+          (unless at-least-one-frame-p
+            (setf at-least-one-frame-p t)))
+      (end-of-file (err)
+        (or at-least-one-frame-p (error err))))))
 
 (defun write-data (data multiplex-stream channel &key (start 0) end)
   "Like WRITE-SEQUENCE for mutiplex streams. Write the byte of DATA
