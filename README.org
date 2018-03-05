@@ -57,12 +57,14 @@ successfully to the underlying stream.
 Clear the input of all the channels of /multiplex-tream/.
 
 #+BEGIN_SRC lisp
-(demultiplex multiplex-stream) => boolean
+(demultiplex multiplex-stream &optional max-frames) => boolean
 #+END_SRC
 
 Read data from the underlying stream of /multiplex-stream/ and
-demultiplex as many frames as possible. Return /T/ if at least one
-frame was demultiplexed successfully, and /NIL/ otherwise.
+demultiplex the frames. Return /T/ if at least one frame was
+demultiplexed successfully, and /NIL/ otherwise. If /max-frames/ is
+a positive integer, at most /max-frames/ frames will be
+demultiplexed."
 
 #+BEGIN_SRC lisp
 (write-data data multiplex-stream channel &key (start 0) end) => data
@@ -92,6 +94,60 @@ Clear the input of a specific /channel/ of /multiplex-tream/.
 
 Return a stream that can be used to read/write data from/to
 a specific /channel/ of /multiplex-stream/.
+
+* Example
+
+Multiplex the contents of /data-file1/ and /data-file2/ to
+/multiplexed-file/:
+
+#+BEGIN_SRC lisp
+(with-open-file (d1 "data-file1" :element-type '(unsigned-byte 8))
+  (with-open-file (d2 "data-file2" :element-type '(unsigned-byte 8))
+    (with-open-file (f "multiplexed-file"
+                       :direction :output
+                       :if-exists :supersede
+                       :element-type '(unsigned-byte 8))
+      (with-multiplex-stream (mux f 2)
+        (do ((buffer (make-array 2048 :element-type '(unsigned-byte 8)))
+             (n1 1)
+             (n2 1))
+            ((zerop (max n1 n2)))
+          (setf n1 (read-sequence buffer d1))
+          (write-data buffer mux 0 :end n1)
+          (setf n2 (read-sequence buffer d2))
+          (write-data buffer mux 1 :end n2)
+          (multiplex mux))))))
+#+END_SRC
+
+
+Demultiplex /multiplexed-file/ to /demux-file1/ and /demux-file2/:
+
+#+BEGIN_SRC lisp
+(with-open-file (f "multiplexed-file" :element-type '(unsigned-byte 8))
+  (with-open-file (d1 "demux-file1"
+                      :direction :output
+                      :if-exists :supersede
+                      :element-type '(unsigned-byte 8))
+    (with-open-file (d2 "demux-file2"
+                        :direction :output
+                        :if-exists :supersede
+                        :element-type '(unsigned-byte 8))
+      (with-multiplex-stream (mux f 2)
+        (do ((buffer (make-array 2048 :element-type '(unsigned-byte 8)))
+             (n1 1)
+             (n2 1))
+            ((zerop (max n1 n2)))
+          (handler-case
+              (demultiplex m 10)
+            (end-of-file ()))
+          (setf n1 (read-data buffer mux 0))
+          (write-sequence buffer d1 :end n)
+          (setf n2 (read-data buffer mux 1))
+          (write-sequence buffer d2 :end n))))))
+#+END_SRC
+
+/data-file1/ and /demux-file1/ should be identical, and /data-file2/
+and /demux-file2/ should be identical.
 
 * Protocol
 

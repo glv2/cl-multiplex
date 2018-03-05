@@ -148,17 +148,23 @@ successfully, and NIL otherwise."
               (setf data-length n)
               nil))))))
 
-(defun demultiplex (multiplex-stream)
+(defun demultiplex (multiplex-stream &optional max-frames)
   "Read data from the underlying stream of MULTIPLEX-STREAM and
-demultiplex as many frames as possible. Return T if at least one frame
-was demultiplexed successfully, and NIL otherwise."
+demultiplex the frames. Return T if at least one frame was
+demultiplexed successfully, and NIL otherwise. If MAX-FRAMES is
+a positive integer, at most MAX-FRAMES frames will be demultiplexed."
   (let ((at-least-one-frame-p nil))
     (handler-case
-        (do ((frame-p (demultiplex-1 multiplex-stream)
-                      (demultiplex-1 multiplex-stream)))
-            ((null frame-p) at-least-one-frame-p)
-          (unless at-least-one-frame-p
-            (setf at-least-one-frame-p t)))
+        (do ((frame-p t)
+             (n (when (and (integerp max-frames) (plusp max-frames))
+                  max-frames)))
+            ((or (null frame-p) (and n (zerop n))) at-least-one-frame-p)
+          (setf frame-p (demultiplex-1 multiplex-stream))
+          (when frame-p
+            (when n
+              (decf n))
+            (unless at-least-one-frame-p
+              (setf at-least-one-frame-p t))))
       (end-of-file (err)
         (or at-least-one-frame-p (error err))))))
 
