@@ -111,7 +111,7 @@ successfully, and NIL otherwise."
     (flet ((read-integer ()
              (loop
                (let ((b (read-byte stream)))
-                 (when (>= data-length (length data))
+                 (when (= data-length (length data))
                    (let ((new-buffer (make-array (* 2 (length data))
                                                  :element-type '(unsigned-byte 8))))
                      (replace new-buffer data :end2 data-length)
@@ -131,7 +131,7 @@ successfully, and NIL otherwise."
         (setf channel (read-integer)))
       (unless length
         (setf length (read-integer)))
-      (when (>= length (length data))
+      (when (> length (length data))
         (setf data (make-array length :element-type '(unsigned-byte 8))))
       (let ((input (aref inputs channel))
             (n (read-sequence data stream :start data-length :end length)))
