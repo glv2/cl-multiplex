@@ -108,15 +108,16 @@ Multiplex the contents of /data-file1/ and /data-file2/ to
                        :if-exists :supersede
                        :element-type '(unsigned-byte 8))
       (with-multiplex-stream (mux f 2)
-        (do ((buffer (make-array 2048 :element-type '(unsigned-byte 8)))
-             (n1 1)
-             (n2 1))
-            ((zerop (max n1 n2)))
-          (setf n1 (read-sequence buffer d1))
-          (write-data buffer mux 0 :end n1)
-          (setf n2 (read-sequence buffer d2))
-          (write-data buffer mux 1 :end n2)
-          (multiplex mux))))))
+        (let ((buffer (make-array 2048 :element-type '(unsigned-byte 8)))
+              (data-p t))
+          (loop while data-p do
+            (let ((n (read-sequence buffer d1)))
+              (write-data buffer mux 0 :end n)
+              (setf data-p (plusp n)))
+            (let ((n (read-sequence buffer d2)))
+              (write-data buffer mux 1 :end n)
+              (setf data-p (or data-p (plusp n))))
+            (multiplex mux)))))))
 #+END_SRC
 
 
@@ -133,17 +134,18 @@ Demultiplex /multiplexed-file/ to /demux-file1/ and /demux-file2/:
                         :if-exists :supersede
                         :element-type '(unsigned-byte 8))
       (with-multiplex-stream (mux f 2)
-        (do ((buffer (make-array 2048 :element-type '(unsigned-byte 8)))
-             (n1 1)
-             (n2 1))
-            ((zerop (max n1 n2)))
-          (handler-case
-              (demultiplex m 10)
-            (end-of-file ()))
-          (setf n1 (read-data buffer mux 0))
-          (write-sequence buffer d1 :end n)
-          (setf n2 (read-data buffer mux 1))
-          (write-sequence buffer d2 :end n))))))
+        (let ((buffer (make-array 2048 :element-type '(unsigned-byte 8)))
+              (data-p t))
+          (loop while data-p do
+            (setf data-p (handler-case
+                             (demultiplex m 10)
+                           (end-of-file ())))
+            (loop for n = (read-data buffer mux 0)
+                  until (zerop n)
+                  do (write-sequence buffer d1 :end n))
+            (loop for n = (read-data buffer mux 1)
+                  until (zerop n)
+                  do (write-sequence buffer d2 :end n))))))))
 #+END_SRC
 
 /data-file1/ and /demux-file1/ should be identical, and /data-file2/
