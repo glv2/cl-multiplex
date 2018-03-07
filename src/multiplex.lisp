@@ -24,7 +24,9 @@
 
 (defstruct (multiplex-stream (:constructor %make-multiplex-stream))
   stream
-  (data (make-array 128 :element-type '(unsigned-byte 8))
+  (buffer (make-array 1024 :element-type '(unsigned-byte 8))
+   :type (simple-array (unsigned-byte 8) (*)))
+  (data (make-array 1024 :element-type '(unsigned-byte 8))
    :type (simple-array (unsigned-byte 8) (*)))
   (data-length 0 :type (mod #.array-dimension-limit))
   (current-frame-channel nil :type (or null unsigned-byte))
@@ -70,7 +72,10 @@ frames written to the underlying stream contain at most
 MAX-FRAME-SIZE bytes of user data."
   (let ((stream (multiplex-stream-stream multiplex-stream))
         (outputs (multiplex-stream-outputs multiplex-stream))
-        (buffer (make-array max-frame-size :element-type '(unsigned-byte 8))))
+        (buffer (multiplex-stream-buffer multiplex-stream)))
+    (when (< (length buffer) max-frame-size)
+      (setf buffer (make-array max-frame-size :element-type '(unsigned-byte 8)))
+      (setf (multiplex-stream-buffer multiplex-stream) buffer))
     (flet ((write-integer (n)
              (do* ((l (max 1 (ceiling (integer-length n) 7)) (1- l))
                    (x n (ash x -7)))
