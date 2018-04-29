@@ -70,7 +70,7 @@ demultiplexed."
 (write-data data multiplex-stream channel &key (start 0) end) => data
 #+END_SRC
 
-Like /write-sequence/ for mutiplex streams. Write the byte of /data/
+Like /write-sequence/ for mutiplex streams. Write the bytes of /data/
 between /start/ end /end/ to a specific /channel/ of
 /multiplex-stream/.
 
@@ -138,7 +138,7 @@ Demultiplex /multiplexed-file/ to /demux-file1/ and /demux-file2/:
               (data-p t))
           (loop while data-p do
             (setf data-p (handler-case
-                             (demultiplex m 10)
+                             (demultiplex mux 10)
                            (end-of-file ())))
             (loop for n = (read-data buffer mux 0)
                   until (zerop n)
