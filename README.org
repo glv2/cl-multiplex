@@ -57,14 +57,14 @@ successfully to the underlying stream.
 Clear the input of all the channels of /multiplex-tream/.
 
 #+BEGIN_SRC lisp
-(demultiplex multiplex-stream &optional max-frames) => boolean
+(demultiplex multiplex-stream &optional max-frames max-frame-size) => boolean
 #+END_SRC
 
-Read data from the underlying stream of /multiplex-stream/ and
-demultiplex the frames. Return /t/ if at least one frame was
-demultiplexed successfully, and /nil/ otherwise. If /max-frames/ is
-a positive integer, at most /max-frames/ frames will be
-demultiplexed."
+Read data from the underlying stream of /multiplex-stream/ and demultiplex the
+frames. Return /t/ if at least one frame was demultiplexed successfully, and
+/nil/ otherwise. If /max-frames/ is a positive integer, at most /max-frames/
+frames will be demultiplexed. If /max-frame-size/ is a positive integer and
+a frame bigger than /max-frame-size/ is detected, an error is signalled.
 
 #+BEGIN_SRC lisp
 (write-data data multiplex-stream channel &key (start 0) end) => data

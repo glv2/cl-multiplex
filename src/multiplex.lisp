@@ -7,7 +7,8 @@
 (defpackage :multiplex
   (:nicknames :cl-multiplex)
   (:use :cl :octet-streams)
-  (:export #:make-multiplex-stream
+  (:export #:multiplex-error
+           #:make-multiplex-stream
            #:close-multiplex-stream
            #:with-multiplex-stream
            #:multiplex
@@ -33,6 +34,9 @@
   (current-frame-length nil :type (or null unsigned-byte))
   inputs
   outputs)
+
+(define-condition multiplex-error (error)
+  ((message :initarg :message :reader :error-message)))
 
 (defun make-multiplex-stream (stream channels)
   "Return a multiplex stream. The data written to several channels
@@ -102,7 +106,7 @@ successfully to the underlying stream."
     (dotimes (channel (length inputs))
       (clear-input (aref inputs channel)))))
 
-(defun demultiplex-1 (multiplex-stream)
+(defun demultiplex-1 (multiplex-stream max-frame-size)
   "Read data from the underlying stream of MULTIPLEX-STREAM and
 demultiplex one frame. Return T if a frame was demultiplexed
 successfully, and NIL otherwise."
@@ -131,11 +135,23 @@ successfully, and NIL otherwise."
                         ((= i (1- data-length))
                          (progn
                            (setf data-length 0)
-                           (return-from read-integer n)))))))))
+                           (return-from read-integer n))))))))
+           (reset-demultiplexer ()
+             (setf data-length 0)
+             (setf channel nil)
+             (setf length nil)))
       (unless channel
-        (setf channel (read-integer)))
+        (setf channel (read-integer))
+        (when (>= channel (length inputs))
+          (let ((message (format nil "Bad channel number: ~d" channel)))
+            (reset-demultiplexer)
+            (error 'multiplex-error :message message))))
       (unless length
-        (setf length (read-integer)))
+        (setf length (read-integer))
+        (when (and (integerp max-frame-size) (> length max-frame-size))
+          (let ((message (format nil "Frame too big: ~d" length)))
+            (reset-demultiplexer)
+            (error 'multiplex-error :message message))))
       (when (> length (length data))
         (setf data (make-array length :element-type '(unsigned-byte 8))))
       (let ((input (aref inputs channel))
@@ -143,26 +159,25 @@ successfully, and NIL otherwise."
         (if (= n length)
             (progn
               (write-sequence data input :end length)
-              (setf data-length 0)
-              (setf channel nil)
-              (setf length nil)
+              (reset-demultiplexer)
               t)
             (progn
               (setf data-length n)
               nil))))))
 
-(defun demultiplex (multiplex-stream &optional max-frames)
-  "Read data from the underlying stream of MULTIPLEX-STREAM and
-demultiplex the frames. Return T if at least one frame was
-demultiplexed successfully, and NIL otherwise. If MAX-FRAMES is
-a positive integer, at most MAX-FRAMES frames will be demultiplexed."
+(defun demultiplex (multiplex-stream &optional max-frames max-frame-size)
+  "Read data from the underlying stream of MULTIPLEX-STREAM and demultiplex the
+frames. Return T if at least one frame was demultiplexed successfully, and NIL
+otherwise. If MAX-FRAMES is a positive integer, at most MAX-FRAMES frames will
+be demultiplexed. If MAX-FRAME-SIZE is a positive integer and a frame bigger
+than MAX-FRAME-SIZE is detected, an error is signalled."
   (let ((at-least-one-frame-p nil))
     (handler-case
         (do ((frame-p t)
              (n (when (and (integerp max-frames) (plusp max-frames))
                   max-frames)))
             ((or (null frame-p) (and n (zerop n))) at-least-one-frame-p)
-          (setf frame-p (demultiplex-1 multiplex-stream))
+          (setf frame-p (demultiplex-1 multiplex-stream max-frame-size))
           (when frame-p
             (when n
               (decf n))
@@ -174,22 +189,39 @@ a positive integer, at most MAX-FRAMES frames will be demultiplexed."
 (defun write-data (data multiplex-stream channel &key (start 0) end)
   "Like WRITE-SEQUENCE for mutiplex streams. Write the byte of DATA
 between START end END to a specific CHANNEL of MULTIPLEX-STREAM."
-  (let ((output (aref (multiplex-stream-outputs multiplex-stream) channel)))
-    (write-sequence data output :start start :end end)))
+  (let ((outputs (multiplex-stream-outputs multiplex-stream)))
+    (when (>= channel (length outputs))
+      (let ((message (format nil "Bad channel number: ~d" channel)))
+        (error 'multiplex-error :message message)))
+    (let ((output (aref outputs channel)))
+      (write-sequence data output :start start :end end))))
 
 (defun read-data (data multiplex-stream channel &key (start 0) end)
   "Like READ-SEQUENCE for multiplex streams. Fill DATA between START
 and END with bytes read from a specific CHANNEL of MULTIPLEX-STREAM."
-  (let ((input (aref (multiplex-stream-inputs multiplex-stream) channel)))
-    (read-sequence data input :start start :end end)))
+  (let ((inputs (multiplex-stream-inputs multiplex-stream)))
+    (when (>= channel (length inputs))
+      (let ((message (format nil "Bad channel number: ~d" channel)))
+        (error 'multiplex-error :message message)))
+    (let ((input (aref inputs channel)))
+      (read-sequence data input :start start :end end))))
 
 (defun clear-channel-input (multiplex-stream channel)
   "Clear the input of a specific CHANNEL of MULTIPLEX-TREAM."
-  (let ((input (aref (multiplex-stream-inputs multiplex-stream) channel)))
-    (clear-input input)))
+  (let ((inputs (multiplex-stream-inputs multiplex-stream)))
+    (when (>= channel (length inputs))
+      (let ((message (format nil "Bad channel number: ~d" channel)))
+        (error 'multiplex-error :message message)))
+    (let ((input (aref inputs channel)))
+      (clear-input input))))
 
 (defun get-channel-stream (multiplex-stream channel)
   "Return a stream that can be used to read/write data from/to
 a specific CHANNEL of MULTIPLEX-STREAM."
-  (make-two-way-stream (aref (multiplex-stream-inputs multiplex-stream) channel)
-                       (aref (multiplex-stream-outputs multiplex-stream) channel)))
+  (let ((inputs (multiplex-stream-inputs multiplex-stream))
+        (outputs (multiplex-stream-outputs multiplex-stream)))
+    (when (>= channel (length inputs))
+      (let ((message (format nil "Bad channel number: ~d" channel)))
+        (error 'multiplex-error :message message)))
+    (make-two-way-stream (aref inputs channel)
+                         (aref outputs channel))))
