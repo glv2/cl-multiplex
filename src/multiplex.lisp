@@ -36,14 +36,16 @@
   outputs)
 
 (define-condition multiplex-error (error)
-  ((message :initarg :message :reader :error-message)))
+  ((message :initarg :message :reader error-message))
+  (:report (lambda (condition stream)
+             (format stream "~a" (error-message condition)))))
 
 (defun make-multiplex-stream (stream channels)
   "Return a multiplex stream. The data written to several channels
 will be multiplexed before being written to STREAM. The data read from
 STREAM will be demultiplexed and made available in the channels. The
 number of channels to use is indicated by CHANNELS."
-  (assert (plusp channels))
+  (check-type channels (integer 1 *))
   (let ((inputs (make-array channels))
         (outputs (make-array channels)))
     (dotimes (channel channels)
@@ -149,7 +151,7 @@ successfully, and NIL otherwise."
       (unless length
         (setf length (read-integer))
         (when (and (integerp max-frame-size) (> length max-frame-size))
-          (let ((message (format nil "Frame too big: ~d" length)))
+          (let ((message (format nil "Frame too big: ~d bytes" length)))
             (reset-demultiplexer)
             (error 'multiplex-error :message message))))
       (when (> length (length data))
