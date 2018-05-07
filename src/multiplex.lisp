@@ -144,16 +144,36 @@ successfully, and NIL otherwise."
              (setf length nil)))
       (unless channel
         (setf channel (read-integer))
-        (when (>= channel (length inputs))
-          (let ((message (format nil "Bad channel number: ~d" channel)))
+        (restart-case
+            (when (>= channel (length inputs))
+              (let ((message (format nil "Bad channel number: ~d (max ~d)"
+                                     channel (1- (length inputs)))))
+                (reset-demultiplexer)
+                (error 'multiplex-error :message message)))
+          (reset-demultiplexer ()
+            :report "Reset the demultiplexer (drop channel number)."
             (reset-demultiplexer)
-            (error 'multiplex-error :message message))))
+            (return-from demultiplex-1 nil))))
       (unless length
         (setf length (read-integer))
-        (when (and (integerp max-frame-size) (> length max-frame-size))
-          (let ((message (format nil "Frame too big: ~d bytes" length)))
+        (restart-case
+            (when (and (integerp max-frame-size) (> length max-frame-size))
+              (let ((message (format nil "Frame too big: ~d bytes (max ~d bytes)"
+                                     length max-frame-size)))
+                (error 'multiplex-error :message message)))
+          (process-frame ()
+            :report "Demultiplex the frame anyway.")
+          (drop-frame ()
+            :report "Read the data of the frame and ignore it."
+            (do ((n length
+                    (- n (read-sequence data stream :end (min n (length data))))))
+                ((zerop n)))
             (reset-demultiplexer)
-            (error 'multiplex-error :message message))))
+            (return-from demultiplex-1 nil))
+          (reset-demultiplexer ()
+            :report "Reset the demultiplexer (drop channel number and frame length)."
+            (reset-demultiplexer)
+            (return-from demultiplex-1 nil))))
       (when (> length (length data))
         (setf data (make-array length :element-type '(unsigned-byte 8))))
       (let ((input (aref inputs channel))
