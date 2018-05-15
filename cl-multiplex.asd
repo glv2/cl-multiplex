@@ -12,8 +12,7 @@
   :author "Guillaume LE VAILLANT"
   :depends-on ("cl-octet-streams")
   :in-order-to ((test-op (test-op "cl-multiplex/tests")))
-  :components ((:module "src"
-                :components ((:file "multiplex")))))
+  :components ((:file "multiplex")))
 
 (defsystem "cl-multiplex/tests"
   :name "cl-multiples/tests"
@@ -27,5 +26,4 @@
                     (let ((tests (uiop:find-symbol* 'cl-multiplex
                                                     :cl-multiplex/tests)))
                       (uiop:symbol-call :fiveam 'run! tests)))
-  :components ((:module "tests"
-                :components ((:file "tests")))))
+  :components ((:file "tests")))
