@@ -10,6 +10,9 @@ The only dependency is the [[https://github.com/glv2/cl-octet-streams][cl-octet-
 
 * Multiplex streams
 
+The functions are in the /multiplex/ package (you can also use the nickname
+/cl-multiplex/).
+
 #+BEGIN_SRC lisp
 (make-multiplex-stream stream channels) => multiplex-stream
 #+END_SRC
@@ -95,12 +98,42 @@ Clear the input of a specific /channel/ of /multiplex-tream/.
 Return a stream that can be used to read/write data from/to
 a specific /channel/ of /multiplex-stream/.
 
+** Low-level functions
+
+In case you need to read or write frames to a stream one by one, you can use the
+/read-frame/ and /write-frame/ functions.
+
+#+BEGIN_SRC lisp
+(write-frame stream channel data &key (start 0) (end (length data))) => data
+#+END_SRC
+
+Make a frame for a /channel/ with the bytes of /data/ between /start/ and /end/
+and write it to a /stream/.
+
+#+BEGIN_SRC lisp
+(read-frame stream &key incomplete-frame max-frame-size buffer) => frame, boolean
+#+END_SRC
+
+Try to read a frame from a /stream/. The first returned value is a list of
+4 elements representing a frame (channel, total length of data, data, length of
+data received so far). The second returned value is /t/ if the frame is complete
+and /nil/ otherwise. If /incomplete-frame/ is specified (it must be an
+incomplete frame returned by a previous call to /read-frame/), the function
+tries to complete it with new data from the /stream/. If /max-frame-size/ is
+a positive integer and a frame bigger than /max-frame-size/ is detected, an
+error is signalled. If /buffer/ is specified (it must be an array of
+/(unsigned-byte 8)/), the function tries to use it instead of allocating a new
+work area.
+
 * Example
 
 Multiplex the contents of /data-file1/ and /data-file2/ to
 /multiplexed-file/:
 
 #+BEGIN_SRC lisp
+(asdf:load-system "cl-multiplex")
+(use-package :multiplex)
+
 (with-open-file (d1 "data-file1" :element-type '(unsigned-byte 8))
   (with-open-file (d2 "data-file2" :element-type '(unsigned-byte 8))
     (with-open-file (f "multiplexed-file"
