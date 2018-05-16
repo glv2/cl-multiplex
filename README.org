@@ -8,10 +8,18 @@ the data read from the octet stream.
 
 The only dependency is the [[https://github.com/glv2/cl-octet-streams][cl-octet-streams]] library.
 
-* Multiplex streams
+If you are using [[https://www.quicklisp.org][quicklisp]], you can put *cl-multiplex* in the /local-projects/
+directory and use:
+#+BEGIN_SRC lisp
+(ql:quickload "cl-multiplex")
+#+END_SRC
+
+* API
 
 The functions are in the /multiplex/ package (you can also use the nickname
 /cl-multiplex/).
+
+** Multiplex streams
 
 #+BEGIN_SRC lisp
 (make-multiplex-stream stream channels) => multiplex-stream
@@ -67,7 +75,7 @@ Read data from the underlying stream of /multiplex-stream/ and demultiplex the
 frames. Return /t/ if at least one frame was demultiplexed successfully, and
 /nil/ otherwise. If /max-frames/ is a positive integer, at most /max-frames/
 frames will be demultiplexed. If /max-frame-size/ is a positive integer and
-a frame bigger than /max-frame-size/ is detected, an error is signalled.
+a frame bigger than /max-frame-size/ is detected, an error is signaled.
 
 #+BEGIN_SRC lisp
 (write-data data multiplex-stream channel &key (start 0) end) => data
@@ -121,11 +129,22 @@ and /nil/ otherwise. If /incomplete-frame/ is specified (it must be an
 incomplete frame returned by a previous call to /read-frame/), the function
 tries to complete it with new data from the /stream/. If /max-frame-size/ is
 a positive integer and a frame bigger than /max-frame-size/ is detected, an
-error is signalled. If /buffer/ is specified (it must be an array of
+error is signaled. If /buffer/ is specified (it must be an array of
 /(unsigned-byte 8)/), the function tries to use it instead of allocating a new
 work area.
 
-* Example
+** Conditions
+
+A /bad-channel-number/ error is signaled when trying to read or write data using
+an incorrect channel number.
+
+A /frame-to-big/ error is signaled when trying to read a frame containing more
+data than the specified /max-frame-size/. There are two restarts than can be
+invoked for this error:
+ - /process-frame/ which reads the frame as if there was no /max-frame-size/
+ - /drop-frame/ which reads the frame from the stream and discards it
+
+* Examples
 
 Multiplex the contents of /data-file1/ and /data-file2/ to
 /multiplexed-file/:

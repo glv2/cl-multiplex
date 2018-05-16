@@ -7,7 +7,8 @@
 (defpackage :multiplex
   (:nicknames :cl-multiplex)
   (:use :cl :octet-streams)
-  (:export #:multiplex-error
+  (:export #:bad-channel-number
+           #:frame-too-big
            #:make-multiplex-stream
            #:close-multiplex-stream
            #:with-multiplex-stream
@@ -16,6 +17,8 @@
            #:finish-multiplex-output
            #:clear-multiplex-input
            #:read-frame
+           #:process-frame
+           #:drop-frame
            #:demultiplex
            #:write-data
            #:read-data
@@ -33,10 +36,19 @@
   inputs
   outputs)
 
-(define-condition multiplex-error (error)
-  ((message :initarg :message :reader error-message))
+(define-condition bad-channel-number (error)
+  ((channel :initarg :channel :reader channel)
+   (max-channel :initarg :max-channel :reader max-channel))
   (:report (lambda (condition stream)
-             (format stream "~a" (error-message condition)))))
+             (format stream "Bad channel number: ~d (max ~d)"
+                     (channel condition) (max-channel condition)))))
+
+(define-condition frame-too-big (error)
+  ((frame-length :initarg :frame-length :reader frame-length)
+   (max-length :initarg :max-length :reader max-length))
+  (:report (lambda (condition stream)
+             (format stream "Frame too big: ~d bytes (max ~d bytes)"
+                     (frame-length condition) (max-length condition)))))
 
 (defun make-multiplex-stream (stream channels)
   "Return a multiplex stream. The data written to several channels
@@ -118,7 +130,7 @@ data received so far). The second returned value is T if the frame is complete
 and NIL otherwise. If INCOMPLETE-FRAME is specified (it must be an incomplete
 frame returned by a previous call to READ-FRAME), the function tries to complete
 it with new data from the STREAM. If MAX-FRAME-SIZE is a positive integer and
-a frame bigger than MAX-FRAME-SIZE is detected, an error is signalled. If BUFFER
+a frame bigger than MAX-FRAME-SIZE is detected, an error is signaled. If BUFFER
 is specified (it must be an array of (UNSIGNED-BYTE 8)), the function tries to
 use it instead of allocating a new work area."
   (let ((channel (car incomplete-frame))
@@ -155,17 +167,16 @@ use it instead of allocating a new work area."
               (setf length (read-integer))
               (restart-case
                   (when (and (integerp max-frame-size) (> length max-frame-size))
-                    (let ((message (format nil "Frame too big: ~d bytes (max ~d bytes)"
-                                           length max-frame-size)))
-                      (error 'multiplex-error :message message)))
+                    (error 'frame-too-big :frame-length length :max-length max-frame-size))
                 (process-frame ()
                   :report "Read the frame anyway.")
                 (drop-frame ()
-                  :report "Read the frame and ignore it."
-                  (do ((n length
-                          (- n (read-sequence data stream :end (min n (length data))))))
-                      ((zerop n)))
-                  (return-from read-frame (values nil nil))))))
+                  :report "Read the frame and discard it."
+                  (do* ((r length (- r n))
+                        (n (read-sequence data stream :end (min r (length data)))
+                           (read-sequence data stream :end (min r (length data)))))
+                       ((or (zerop r) (zerop n))))
+                  (return-from read-frame (values (list nil nil data 0) nil))))))
         (end-of-file ()
           (return-from read-frame (values (list channel length data data-length)
                                           nil))))
@@ -182,7 +193,7 @@ use it instead of allocating a new work area."
 frames. Return T if at least one frame was demultiplexed successfully, and NIL
 otherwise. If MAX-FRAMES is a positive integer, at most MAX-FRAMES frames will
 be demultiplexed. If MAX-FRAME-SIZE is a positive integer and a frame bigger
-than MAX-FRAME-SIZE is detected, an error is signalled."
+than MAX-FRAME-SIZE is detected, an error is signaled."
   (do ((stream (multiplex-stream-stream multiplex-stream))
        (inputs (multiplex-stream-inputs multiplex-stream))
        (incomplete-frame (multiplex-stream-frame multiplex-stream))
@@ -205,9 +216,7 @@ than MAX-FRAME-SIZE is detected, an error is signalled."
           frame
         (declare (ignore data-length))
         (when (>= channel (length inputs))
-          (let ((message (format nil "Bad channel number: ~d (max ~d)"
-                                 channel (1- (length inputs)))))
-            (error 'multiplex-error :message message)))
+          (error 'bad-channel-number :channel channel :max-channel (1- (length inputs))))
         (write-sequence data (aref inputs channel) :end length)
         (setf at-least-one-frame-p t)
         (setf buffer data)
@@ -220,8 +229,7 @@ than MAX-FRAME-SIZE is detected, an error is signalled."
 between START end END to a specific CHANNEL of MULTIPLEX-STREAM."
   (let ((outputs (multiplex-stream-outputs multiplex-stream)))
     (when (>= channel (length outputs))
-      (let ((message (format nil "Bad channel number: ~d" channel)))
-        (error 'multiplex-error :message message)))
+      (error 'bad-channel-number :channel channel :max-channel (1- (length outputs))))
     (let ((output (aref outputs channel)))
       (write-sequence data output :start start :end end))))
 
@@ -230,8 +238,7 @@ between START end END to a specific CHANNEL of MULTIPLEX-STREAM."
 and END with bytes read from a specific CHANNEL of MULTIPLEX-STREAM."
   (let ((inputs (multiplex-stream-inputs multiplex-stream)))
     (when (>= channel (length inputs))
-      (let ((message (format nil "Bad channel number: ~d" channel)))
-        (error 'multiplex-error :message message)))
+      (error 'bad-channel-number :channel channel :max-channel (1- (length inputs))))
     (let ((input (aref inputs channel)))
       (read-sequence data input :start start :end end))))
 
@@ -239,8 +246,7 @@ and END with bytes read from a specific CHANNEL of MULTIPLEX-STREAM."
   "Clear the input of a specific CHANNEL of MULTIPLEX-TREAM."
   (let ((inputs (multiplex-stream-inputs multiplex-stream)))
     (when (>= channel (length inputs))
-      (let ((message (format nil "Bad channel number: ~d" channel)))
-        (error 'multiplex-error :message message)))
+      (error 'bad-channel-number :channel channel :max-channel (1- (length inputs))))
     (let ((input (aref inputs channel)))
       (clear-input input))))
 
@@ -250,7 +256,6 @@ a specific CHANNEL of MULTIPLEX-STREAM."
   (let ((inputs (multiplex-stream-inputs multiplex-stream))
         (outputs (multiplex-stream-outputs multiplex-stream)))
     (when (>= channel (length inputs))
-      (let ((message (format nil "Bad channel number: ~d" channel)))
-        (error 'multiplex-error :message message)))
+      (error 'bad-channel-number :channel channel :max-channel (1- (length inputs))))
     (make-two-way-stream (aref inputs channel)
                          (aref outputs channel))))
