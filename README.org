@@ -1,12 +1,14 @@
 #+TITLE: cl-multiplex
 
+The active repository is at https://codeberg.org/glv/cl-multiplex
+
 *cl-multiplex* is a library facilitating the multiplexing of the data
 of several channels into one octet stream, and the demultiplexing of
 the data read from the octet stream.
 
 * Installation
 
-The only dependency is the [[https://github.com/glv2/cl-octet-streams][cl-octet-streams]] library.
+The only dependency is the [[https://codeberg.org/glv/cl-octet-streams][cl-octet-streams]] library.
 
 If you are using [[https://www.quicklisp.org][quicklisp]], you can put *cl-multiplex* in the /local-projects/
 directory and use:
